@@ -1,0 +1,13 @@
+[package]
+name = "amyloid"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ian Wineman"]
+description = "CLI to perform amyloidogenesis prediction from protein sequences."
+readme = "README.md"
+homepage = "https://ianwineman.com/amyloid"
+repository = "https://github.com/ianwineman/amyloid"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4.5.8", features = ["derive"] }
