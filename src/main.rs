@@ -10,44 +10,43 @@ use regex::Regex;
     color = clap::ColorChoice::Never
 )]
 struct Args {
-    /// FASTA formatted string
-    sequence: String,
-
-    #[arg(short, long, help = "Path to FASTA file")]
-    file: bool
+    #[arg(
+        help = "Path to FASTA file",
+        long_help = "Path to file with one or more FASTA formatted sequences, each of which must match: \nr\"(?<des>>.*)\\n(?<seq>([A-IK-NP-Z]+\\n?)+)\""
+    )]
+    path: String,
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Fasta {
     description: String,
     sequence: String
 }
 
 impl Fasta {
-    fn from(s: String) -> Result<Fasta, String> {
-        // TODO handle input/files with multiple sequences
-
-        let re_des = Regex::new(r"^>.*").unwrap();
-        let re_seq = Regex::new(r"^[A-IK-NP-Z]+$").unwrap();
-
-        let lines: Vec<&str> = s.splitn(2,"\n").collect();
-        let des = lines[0];
-        let seq = lines[1].replace("\n", "");
-
-        if re_des.is_match(des) {
-            if re_seq.is_match(&seq) {
-                return Ok(Fasta {
-                    description: String::from(des),
-                    sequence: seq
-                })
-            }
-            else {
-                return Err(seq)
-            }
+    fn from(des: &str, seq: &str) -> Fasta {
+        return Fasta {
+            description: String::from(des),
+            sequence: String::from(seq)
         }
-        else {
-            return Err(String::from("Bare sequence not allowed"))
-        }
+    }
+}
+
+fn parse_fasta(s: String) -> Result<Vec<Fasta>, String> {
+    let mut fastas: Vec<Fasta> = Vec::new();
+
+    let re = Regex::new(r"(?<des>>.*)\n(?<seq>([A-IK-NP-Z]+\n?)+)").unwrap();
+
+    for (_, [des, seq, _]) in re.captures_iter(&s).map(|c| c.extract()) {
+        fastas.push(Fasta::from(des, seq));
+    }
+
+    if fastas.len() == 0 {
+        return Err(String::from("no sequences found"))
+    }
+    else {
+        return Ok(fastas)
     }
 }
 
@@ -75,60 +74,66 @@ fn amyloid_pred(_sequence: &str) -> f64 {
 fn main() {
     let args = Args::parse();
 
-    if args.file {
-        let file = fs::read_to_string(args.sequence);
+    let file = fs::read_to_string(args.path);
 
-        match file {
-            Ok(contents) => {
-                let fasta = Fasta::from(contents);
+    match file {
+        Ok(contents) => {
+            let fastas = parse_fasta(contents);
 
-                match fasta {
-                    Ok(s) => {
-                        println!("{:.4}", amyloid_pred(&s.sequence));
-                    },
-                    Err(e) => {
-                        println!("error: cannot parse <SEQUENCE> as FASTA\n{}", e);
+            match fastas {
+                Ok(f) => {
+                    for fasta in f {
+                        println!("{:.4}", amyloid_pred(&fasta.sequence));
                     }
-                }
-            },
-            Err(e) => {
-                println!("error: {}", e);
+                },
+                Err(e) => println!("error: {}", e)
             }
-        }
-    }
-    else {
-        let fasta = Fasta::from(args.sequence);
-
-        match fasta {
-            Ok(s) => {
-                println!("{:.4}", amyloid_pred(&s.sequence));
-            },
-            Err(e) => {
-                println!("error: cannot parse <SEQUENCE> as FASTA\n{}", e);
-            }
+        },
+        Err(e) => {
+            println!("error: {}", e);
         }
     }
 }
 
 #[cfg(test)]
-// TODO write tests
 mod tests {
     use super::*;
 
     #[test]
+    // parse file with single FASTA formatted sequence
     fn single_fasta_parse() {
-        let file = fs::read_to_string("test/Q31Q05.fasta").unwrap();
-        let fasta = Fasta::from(file).unwrap();
+        let file = fs::read_to_string("test/single.fasta").unwrap();
+        let fastas = parse_fasta(file).unwrap();
 
-        assert_eq!(fasta.description, String::from(">sp|Q31Q05|RAF1_SYNE7 RuBisCO accumulation factor 1 OS=Synechococcus elongatus (strain ATCC 33912 / PCC 7942 / FACHB-805) OX=1140 GN=raf1 PE=1 SV=1"));
-        assert_eq!(fasta.sequence, String::from("MREFTPTTLSEEERQELLGQLRRKEGRWLAWARACQTLLKNGLNPQTLFEATGFEPIQQNQITVAMQVYDSILRQDPPAHVRETYQEWGSDLLYELRELDQEQRSLCAQLALERKLDADQIREVAKATKDFCRLPKQPENFDRHPGDAVAHQCWRLAQERTDLTERSRLIARGLQFAQSAGARALIEALLLDLSGVPSRKPPMLPIYRLETEEDLPRLLPFAGTLPLSSSQIEAIAAVEAEGPFGLVSSPQGQQWLALPGWQAILTAEDPIACLEQIDRLPNAPEGPTEAVVLVVDRADRDWDADHFFLVEQAEGARIQWSPSAIAAPILGRLVLILRPKRVLDEAAIATPWQFEE"));
+        assert_eq!(1, fastas.len());
     }
 
     #[test]
-    fn bare_fasta_parse() {
-        let file = fs::read_to_string("test/Q31Q05_bare.fasta").unwrap();
-        let fasta = Fasta::from(file);
+    // parse file with five FASTA formatted sequences
+    fn multi_fasta_parse() {
+        let file = fs::read_to_string("test/multi.fasta").unwrap();
+        let fastas = parse_fasta(file).unwrap();
 
-        assert_eq!(true, fasta.is_err());
+        assert_eq!(5, fastas.len());
+    }
+
+    #[test]
+    // parse file with single FASTA formatted sequence
+    // with additional non-sequence characters
+    fn single_fuzzy_fasta_parse() {
+        let file = fs::read_to_string("test/single_fuzzy.fasta").unwrap();
+        let fastas = parse_fasta(file).unwrap();
+
+        assert_eq!(1, fastas.len());
+    }
+
+    #[test]
+    // parse file with five FASTA formatted sequences
+    // with additional non-sequence characters
+    fn multi_fuzzy_fasta_parse() {
+        let file = fs::read_to_string("test/multi.fasta").unwrap();
+        let fastas = parse_fasta(file).unwrap();
+
+        assert_eq!(5, fastas.len());
     }
 }
